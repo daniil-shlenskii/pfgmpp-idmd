@@ -309,7 +309,7 @@ def training_loop(
             with misc.ddp_sync(G_ddp, False):
                 images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
             with misc.ddp_sync(fake_score_ddp, (round_idx == num_accumulation_rounds - 1)):
-                loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe)
+                loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe, D=D)
                 loss=loss.sum().mul(loss_scaling / batch_gpu_total)
                 loss.backward()
         loss_fake_score_print = loss.item()
@@ -340,7 +340,7 @@ def training_loop(
                 images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
 
                 with misc.ddp_sync(fake_score_ddp, False):
-                    loss = loss_fn.generator_loss(true_score=true_score, fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=None,alpha=alpha,tmax=tmax)
+                    loss = loss_fn.generator_loss(true_score=true_score, fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=None,alpha=alpha,tmax=tmax, D=D)
                     loss=loss.sum().mul(loss_scaling_G / batch_gpu_total)
                     loss.backward()
         lossG_print = loss.item()

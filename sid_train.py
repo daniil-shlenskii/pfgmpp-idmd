@@ -10,18 +10,20 @@ Pretrained Diffusion Models for One-Step Generation"."""
 
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import socket
-import re
 import json
+import re
+import socket
+import warnings
+
 import click
 import torch
-import dnnlib
 
+import dnnlib
 from torch_utils import distributed as dist
 from training import sid_training_loop as training_loop
 
-import warnings
 warnings.filterwarnings('ignore', 'Grad strides do not match bucket view strides') # False warning printed by PyTorch 1.12.
 
 #----------------------------------------------------------------------------
@@ -102,6 +104,10 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--glr',           help='Learning rate of fake data generator', metavar='FLOAT',      type=click.FloatRange(min=0, min_open=True), default=1e-5, show_default=True)
 @click.option('--g_beta1',           help='beta_1 of the Adam optimizer for generator', metavar='FLOAT',      type=click.FloatRange(min=0, min_open=False), default=0, show_default=True)
 
+# Parameters for PFGMPP
+@click.option('--aug_dim',    help='Noise standard deviation that is fixed during distillation and generation', metavar='INT|STR', type=int|str, default="inf", show_default=True)
+@click.option('--loss_sid_or_iddm',    help='', metavar='STR', type=str, default="sid", show_default=True)
+
 
 
 def main(**kwargs):
@@ -153,6 +159,7 @@ Pretrained Diffusion Models for One-Step Generation".
     c.g_optimizer_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=opts.glr, betas=[opts.g_beta1, 0.999], eps = 1e-8 if not opts.fp16 else 1e-6)
     
     c.init_sigma = opts.init_sigma
+    c.D = opts.aug_dim
 
     # Validate dataset options.
     try:
@@ -182,6 +189,7 @@ Pretrained Diffusion Models for One-Step Generation".
     #The current SiD code only accepted pretrained edm checkpoint, needs to modify accordingly for the checkpoints of other types of diffusion models
     c.network_kwargs.class_name = 'training.networks.EDMPrecond'
     c.loss_kwargs.class_name = 'training.sid_loss.SID_EDMLoss'
+    c.loss_kwargs.sid_or_iddm = opts.loss_sid_or_iddm
     c.metrics = opts.metrics
 
     # Network options.
