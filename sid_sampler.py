@@ -3,7 +3,6 @@ import torch
 from pfgmpp_kernel import sample_noise
 
 
-# TODO: make it more similar to sid implementation
 def sid_sampler(
     net, *, latents, class_labels=None, init_sigma=2.5, D="inf", **sampling_kwargs
 ):

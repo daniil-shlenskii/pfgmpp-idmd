@@ -259,7 +259,15 @@ def training_loop(
             print('Exporting sample images...')
             save_image_grid(img=images, fname=os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
             images = torch.cat([
-                sid_sampler(G_ema, latents=z, class_labels=c, init_sigma=init_sigma, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device)).cpu() for z, c in zip(grid_z, grid_c)
+                sid_sampler(
+                    G_ema,
+                    latents=z,
+                    class_labels=c,
+                    init_sigma=init_sigma,
+                    D=D,
+                    augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
+                ).cpu()
+                for z, c in zip(grid_z, grid_c)
             ]).numpy()
             save_image_grid(img=images, fname=os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
             del images
@@ -301,13 +309,15 @@ def training_loop(
             images, labels = next(dataset_iterator)
             images = images.to(device).to(torch.float32) / 127.5 - 1
             labels = labels.to(device)
-            z = sample_noise(
-                latents=torch.randn_like(images),
-                sigma=init_sigma,
-                D=D,
-            )
             with misc.ddp_sync(G_ddp, False):
-                images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+                images = sid_sampler(
+                    G_ddp,
+                    latents=torch.randn_like(images),
+                    class_labels=labels,
+                    init_sigma=init_sigma,
+                    D=D,
+                    augment_labels=torch.zeros(images.shape[0], 9).to(images.device),
+                )
             with misc.ddp_sync(fake_score_ddp, (round_idx == num_accumulation_rounds - 1)):
                 loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe, D=D)
                 loss=loss.sum().mul(loss_scaling / batch_gpu_total)
@@ -331,13 +341,15 @@ def training_loop(
             images, labels = next(dataset_iterator)
             images = images.to(device).to(torch.float32) / 127.5 - 1
             labels = labels.to(device)
-            z = sample_noise(
-                latents=torch.randn_like(images),
-                sigma=init_sigma,
-                D=D,
-            )
             with misc.ddp_sync(G_ddp, (round_idx == num_accumulation_rounds - 1)):
-                images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+                images = sid_sampler(
+                    G_ddp,
+                    latents=torch.randn_like(images),
+                    class_labels=labels,
+                    init_sigma=init_sigma,
+                    D=D,
+                    augment_labels=torch.zeros(images.shape[0], 9).to(images.device),
+                )
 
                 with misc.ddp_sync(fake_score_ddp, False):
                     loss = loss_fn.generator_loss(true_score=true_score, fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=None,alpha=alpha,tmax=tmax, D=D)
@@ -398,7 +410,14 @@ def training_loop(
             dist.print0('Exporting sample images...')
             if dist.get_rank() == 0:
                 images = torch.cat([
-                    sid_sampler(G_ema, latents=z, class_labels=c, init_sigma=init_sigma, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device)).cpu() for z, c in zip(grid_z, grid_c)
+                    sid_sampler(
+                        G_ema,
+                        latents=z,
+                        class_labels=c,
+                        init_sigma=init_sigma,
+                        D=D,
+                        augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
+                    ).cpu() for z, c in zip(grid_z, grid_c)
                 ]).numpy()
                 save_image_grid(img=images, fname=os.path.join(run_dir, f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
                 del images
