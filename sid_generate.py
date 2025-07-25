@@ -254,7 +254,7 @@ def main(**kwargs):
 
         # Pick latents and labels.
         rnd = StackedRandomGenerator(device, batch_seeds)
-        latents = rnd.randn([batch_size, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+        latents = rnd.randn([batch_size, net.img_channels, net.img_resolution, net.img_resolution], device=device).to(torch.float64)
         class_labels = None
         if net.label_dim:
             class_labels = torch.eye(net.label_dim, device=device)[rnd.randint(net.label_dim, size=[batch_size], device=device)]

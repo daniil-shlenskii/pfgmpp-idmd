@@ -10,21 +10,23 @@ Pretrained Diffusion Models for One-Step Generation"."""
 
 """Main training loop."""
 
-import os
-import time
 import copy
 import json
+import os
 import pickle
-import psutil
-import PIL.Image
-import numpy as np
-import torch
-import dnnlib
-from torch_utils import distributed as dist
-from torch_utils import training_stats
-from torch_utils import misc
+import time
 
+import numpy as np
+import PIL.Image
+import psutil
+import torch
+
+import dnnlib
 from metrics import sid_metric_main as metric_main
+from pfgmpp_kernel import sample_noise
+from sid_generate import sid_sampler
+from torch_utils import distributed as dist
+from torch_utils import misc, training_stats
 
 
 #----------------------------------------------------------------------------
@@ -145,6 +147,7 @@ def training_loop(
     device              = torch.device('cuda'),
     metrics             = None,
     init_sigma          = None,
+    D                   = "inf",
     data_stat           = None,
 ):
     # Initialize.
@@ -226,7 +229,7 @@ def training_loop(
             fake_score_ddp = torch.nn.parallel.DistributedDataParallel(fake_score, device_ids=[device], broadcast_buffers=False,find_unused_parameters=False)
             G_ddp = torch.nn.parallel.DistributedDataParallel(G, device_ids=[device], broadcast_buffers=False,find_unused_parameters=False)
 
-        else:     
+        else:
             # Setup optimizer.
             misc.copy_params_and_buffers(src_module=data['ema'], dst_module=fake_score, require_all=False)
             misc.copy_params_and_buffers(src_module=data['ema'], dst_module=G, require_all=False)
@@ -245,11 +248,9 @@ def training_loop(
     grid_z = None
     grid_c = None
     
-    
-    
     if dist.get_rank() == 0:
         grid_size, images, labels = setup_snapshot_image_grid(training_set=dataset_obj)
-        grid_z = init_sigma*torch.randn([labels.shape[0], G_ema.img_channels, G_ema.img_resolution, G_ema.img_resolution], device=device)
+        grid_z = torch.randn([labels.shape[0], G_ema.img_channels, G_ema.img_resolution, G_ema.img_resolution], device=device)
         grid_z = grid_z.split(batch_gpu)
 
         grid_c = torch.from_numpy(labels).to(device)
@@ -257,7 +258,9 @@ def training_loop(
         if resume_training is None:
             print('Exporting sample images...')
             save_image_grid(img=images, fname=os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
-            images = torch.cat([G_ema(z, (init_sigma*torch.ones(z.shape[0],1,1,1)).to(z.device), c, augment_labels=torch.zeros(z.shape[0], 9).to(z.device)).cpu() for z, c in zip(grid_z, grid_c)]).numpy()
+            images = torch.cat([
+                sid_sampler(G_ema, latents=z, class_labels=c, init_sigma=init_sigma, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device)).cpu() for z, c in zip(grid_z, grid_c)
+            ]).numpy()
             save_image_grid(img=images, fname=os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
             del images
 
@@ -287,7 +290,7 @@ def training_loop(
     del data # conserve memory
     dist.print0('Exporting sample images...')
   
-    while True:        
+    while True:
         
         #Update fake score network f_psi
         # Accumulate gradients.
@@ -298,11 +301,15 @@ def training_loop(
             images, labels = next(dataset_iterator)
             images = images.to(device).to(torch.float32) / 127.5 - 1
             labels = labels.to(device)
-            z = init_sigma*torch.randn_like(images)
+            z = sample_noise(
+                latents=torch.randn_like(images),
+                sigma=init_sigma,
+                D=D,
+            )
             with misc.ddp_sync(G_ddp, False):
-                images = G_ddp(z, init_sigma*torch.ones(z.shape[0],1,1,1).to(z.device), labels, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+                images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
             with misc.ddp_sync(fake_score_ddp, (round_idx == num_accumulation_rounds - 1)):
-                loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe) 
+                loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe)
                 loss=loss.sum().mul(loss_scaling / batch_gpu_total)
                 loss.backward()
         loss_fake_score_print = loss.item()
@@ -324,9 +331,14 @@ def training_loop(
             images, labels = next(dataset_iterator)
             images = images.to(device).to(torch.float32) / 127.5 - 1
             labels = labels.to(device)
-            z = init_sigma*torch.randn_like(images)
+            z = sample_noise(
+                latents=torch.randn_like(images),
+                sigma=init_sigma,
+                D=D,
+            )
             with misc.ddp_sync(G_ddp, (round_idx == num_accumulation_rounds - 1)):
-                images = G_ddp(z, init_sigma*torch.ones(z.shape[0],1,1,1).to(z.device), labels, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+                images = sid_sampler(G_ddp, latents=z, init_sigma=init_sigma, class_labels=labels, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+
                 with misc.ddp_sync(fake_score_ddp, False):
                     loss = loss_fn.generator_loss(true_score=true_score, fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=None,alpha=alpha,tmax=tmax)
                     loss=loss.sum().mul(loss_scaling_G / batch_gpu_total)
@@ -385,14 +397,15 @@ def training_loop(
 
             dist.print0('Exporting sample images...')
             if dist.get_rank() == 0:
-                
-                images = torch.cat([G_ema(z, init_sigma*torch.ones(z.shape[0],1,1,1).to(z.device).to(z.dtype), c, augment_labels=torch.zeros(z.shape[0], 9).to(z.device).to(z.dtype)).cpu() for z, c in zip(grid_z, grid_c)]).numpy()
+                images = torch.cat([
+                    sid_sampler(G_ema, latents=z, class_labels=c, init_sigma=init_sigma, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device)).cpu() for z, c in zip(grid_z, grid_c)
+                ]).numpy()
                 save_image_grid(img=images, fname=os.path.join(run_dir, f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
                 del images
                 
             dist.print0('Evaluating metrics...')
             for metric in metrics:
-                result_dict = calculate_metric(metric=metric, G=G_ema, init_sigma=init_sigma,
+                result_dict = calculate_metric(metric=metric, G=G_ema, init_sigma=init_sigma, # TODO:
                     dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
                 if dist.get_rank() == 0:
                     print(result_dict.results)

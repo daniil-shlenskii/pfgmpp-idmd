@@ -10,16 +10,21 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import os
-import time
-import hashlib
-import pickle
 import copy
+import hashlib
+import os
+import pickle
+import time
 import uuid
+
 import numpy as np
 import torch
-import dnnlib
 from torch.utils.data import Dataset
+
+import dnnlib
+from sid_sampler import sid_sampler
+
+
 #----------------------------------------------------------------------------
 class NumpyArrayDataset(Dataset):
     """Custom Dataset for loading numpy arrays with a placeholder for labels."""
@@ -43,12 +48,13 @@ class NumpyArrayDataset(Dataset):
 #----------------------------------------------------------------------------
 
 class MetricOptions:
-    def __init__(self, G=None, init_sigma=None, G_kwargs={}, dataset_kwargs={}, data_stat=None, num_gpus=1, rank=0, local_rank=0, device=None, progress=None, cache=True):
+    def __init__(self, G=None, init_sigma=None, D="inf", G_kwargs={}, dataset_kwargs={}, data_stat=None, num_gpus=1, rank=0, local_rank=0, device=None, progress=None, cache=True):
         assert 0 <= rank < num_gpus
         
         self.G              = G
         self.G_kwargs       = dnnlib.EasyDict(G_kwargs)
         self.init_sigma = init_sigma
+        self.D              = D
         self.dataset_kwargs = dnnlib.EasyDict(dataset_kwargs) 
         self.data_stat      = data_stat
         self.num_gpus       = num_gpus
@@ -285,17 +291,18 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
     # Setup generator and load labels.
     G = copy.deepcopy(opts.G).eval().requires_grad_(False).to(opts.device)
     init_sigma = opts.init_sigma
+    D = opts.D
     dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
 
     # Image generation func.
     def run_generator(z, c, init_sigma):
-        img = G(z, init_sigma*torch.ones(z.shape[0],1,1,1).to(z.device), c, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
+        img = sid_sampler(G, latents=z, class_labels=c, init_sigma=init_sigma, D=D, augment_labels=torch.zeros(z.shape[0], 9).to(z.device))
         img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8)
         return img
 
     # JIT.
     if jit:
-        z = init_sigma*torch.zeros([batch_gen, G.img_channels, G.img_resolution, G.img_resolution], device=opts.device)
+        z = torch.zeros([batch_gen, G.img_channels, G.img_resolution, G.img_resolution], device=opts.device)
         c = torch.zeros([batch_gen, G.c_dim], device=opts.device)
         run_generator = torch.jit.trace(run_generator, [z, c, init_sigma], check_trace=False)
 
@@ -309,7 +316,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
     while not stats.is_full():
         images = []
         for _i in range(batch_size // batch_gen):
-            z = init_sigma*torch.randn([batch_gen, G.img_channels, G.img_resolution, G.img_resolution], device=opts.device) 
+            z = torch.randn([batch_gen, G.img_channels, G.img_resolution, G.img_resolution], device=opts.device) 
             c = [dataset.get_label(np.random.randint(len(dataset))) for _i in range(batch_gen)]
             c = torch.from_numpy(np.stack(c)).pin_memory().to(opts.device)
             images.append(run_generator(z, c, init_sigma))
