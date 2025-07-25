@@ -186,6 +186,7 @@ def save_fid(fid, fname):
 @click.option('--class', 'class_idx',      help='Class label  [default: random]', metavar='INT',                    type=click.IntRange(min=0), default=None)
 @click.option('--batch', 'max_batch_size', help='Maximum batch size', metavar='INT',                                type=click.IntRange(min=1), default=64, show_default=True)
 @click.option('--ref', 'ref_path',      help='Dataset reference statistics ', metavar='NPZ|URL',    type=str, required=True)
+@click.option('--single_batch',       help='', metavar='BOOL',    type=bool , default=False, show_default=True)
 
 
 def main(**kwargs):
@@ -229,7 +230,6 @@ def main(**kwargs):
     
     seeds = opts.seeds
     max_batch_size = opts.max_batch_size
-    # image_outdir = opts.image_outdir
     
     num_batches = ((len(seeds) - 1) // (max_batch_size * dist.get_world_size()) + 1) * dist.get_world_size()
     all_batches = torch.as_tensor(seeds).tensor_split(num_batches)
@@ -282,6 +282,9 @@ def main(**kwargs):
         for seed, image_np in zip(batch_seeds, images_np):
             image_path = os.path.join(image_dir, f'{seed:06d}.png')
             save_image(img=image_np,num_channel=image_np.shape[2],fname=image_path)
+        if opts.single_batch:
+            dist.print0('Single batch is sample. Exiting.')
+            return
 
     # Done.
     torch.distributed.barrier()
