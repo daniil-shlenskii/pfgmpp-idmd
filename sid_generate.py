@@ -13,35 +13,35 @@ Pretrained Diffusion Models for One-Step Generation"."""
 
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-import socket
-import re
 import json
+import pickle
+import re
+import socket
+
 import click
+import numpy as np
+import PIL.Image
 import scipy.linalg
 import torch
-import dnnlib
+import tqdm
 
+import dnnlib
+from pfgmpp_kernel import sample_noise
 from torch_utils import distributed as dist
 from training import dataset
-
-
-import click
-import tqdm
-import pickle
-import numpy as np
-
-import PIL.Image
-
 
 #----------------------------------------------------------------------------
 
 def sid_sampler(
-    net, latents, class_labels=None, randn_like=torch.randn_like,init_sigma=2.5
+    net, latents, class_labels=None, randn_like=torch.randn_like, init_sigma=2.5, D="inf",
 ):
-    z = latents.to(torch.float64) * init_sigma
-    x = net(z, (init_sigma*torch.ones(z.shape[0],1,1,1)).to(z.device), class_labels).to(torch.float64)
+    latents=latents.to(torch.float64)
+    init_sigma = torch.tensor([init_sigma] * len(latents), device=latents.device, dtype=torch.float64)
+    z = sample_noise(latents=latents, sigma=init_sigma, D=D)
+    x = net(z, init_sigma, class_labels).to(torch.float64)
     return x
 
 def calculate_inception_stats(detector_url,
@@ -175,6 +175,7 @@ def save_fid(fid, fname):
 
 @click.command()
 
+@click.option('--aug_dim',    help='', metavar='INT|STR', type=int|str, default="inf", show_default=True)
 @click.option('--init_sigma',    help='Noise standard deviation that is fixed during distillation and generation', metavar='FLOAT', type=click.FloatRange(min=0, min_open=True), default=2.5, show_default=True)
 @click.option('--data_stat',     help='Path to the dataset stats', metavar='ZIP|DIR',               type=str, default=None)
 @click.option('--network', 'network_pkl',  help='Network pickle filename', metavar='PATH|URL',                      type=str, required=True)
@@ -272,7 +273,7 @@ def main(**kwargs):
 
         # Generate images.
         sampler_kwargs = {}
-        images = sid_sampler(net, latents, class_labels, randn_like=rnd.randn_like,init_sigma=opts.init_sigma, **sampler_kwargs)
+        images = sid_sampler(net, latents, class_labels, randn_like=rnd.randn_like, init_sigma=opts.init_sigma, D=opts.aug_dim, **sampler_kwargs)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
