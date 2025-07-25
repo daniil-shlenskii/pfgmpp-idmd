@@ -29,19 +29,11 @@ import torch
 import tqdm
 
 import dnnlib
-from pfgmpp_kernel import sample_noise
+from sid_sampler import sid_sampler
 from torch_utils import distributed as dist
 from training import dataset
 
 #----------------------------------------------------------------------------
-
-def sid_sampler(
-    net, latents, class_labels=None, randn_like=torch.randn_like, init_sigma=2.5, D="inf", **sampling_kwargs
-):
-    init_sigma = torch.tensor([init_sigma] * len(latents), device=latents.device, dtype=latents.dtype)
-    z = sample_noise(latents=latents, sigma=init_sigma, D=D)
-    x = net(z, init_sigma, class_labels, **sampling_kwargs)
-    return x
 
 def calculate_inception_stats(detector_url,
     image_path, num_expected=None, seed=0, max_batch_size=64,
@@ -272,7 +264,7 @@ def main(**kwargs):
 
         # Generate images.
         sampler_kwargs = {}
-        images = sid_sampler(net, latents, class_labels, randn_like=rnd.randn_like, init_sigma=opts.init_sigma, D=opts.aug_dim, **sampler_kwargs)
+        images = sid_sampler(net, latents=latents, class_labels=class_labels, init_sigma=opts.init_sigma, D=opts.aug_dim, **sampler_kwargs)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
