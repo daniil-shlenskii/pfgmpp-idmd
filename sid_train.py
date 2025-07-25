@@ -106,7 +106,7 @@ class CommaSeparatedList(click.ParamType):
 
 # Parameters for PFGMPP
 @click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
-@click.option('--loss_sid_or_iddm',    help='', metavar='STR', type=str, default="sid", show_default=True)
+@click.option('--loss_sid_or_idmd',    help='', metavar='STR', type=str, default="sid", show_default=True)
 
 
 
@@ -189,7 +189,7 @@ Pretrained Diffusion Models for One-Step Generation".
     #The current SiD code only accepted pretrained edm checkpoint, needs to modify accordingly for the checkpoints of other types of diffusion models
     c.network_kwargs.class_name = 'training.networks.EDMPrecond'
     c.loss_kwargs.class_name = 'training.sid_loss.SID_EDMLoss'
-    c.loss_kwargs.sid_or_iddm = opts.loss_sid_or_iddm
+    c.loss_kwargs.sid_or_idmd = opts.loss_sid_or_idmd
     c.metrics = opts.metrics
 
     # Network options.
