@@ -116,26 +116,6 @@ def append_line(jsonl_line, fname):
 
 
 #----------------------------------------------------------------------------
-class EvalModeDropout(nn.Module):
-    def __init__(self, p):
-        super().__init__()
-        self.p = p
-    
-    def forward(self, x):
-        return x / (1 - self.p)
-
-    def extra_repr(self):
-        return f"p={self.p}"
-
-def remove_dropout_from_model(model: nn.Module):
-    for name, module in model.named_children():
-        if isinstance(module, nn.Dropout):
-            setattr(model, name, EvalModeDropout(p=module.p))
-        elif isinstance(module, nn.Module):
-            remove_dropout_from_model(module)
-    return model
-
-#----------------------------------------------------------------------------
 
 def training_loop(
     run_dir             = '.',      # Output directory.
@@ -170,7 +150,6 @@ def training_loop(
     init_sigma          = None,
     D                   = "inf",
     update_fake_score_iters = 1,
-    remove_dropout      = False,
     data_stat           = None,
 ):
     # Initialize.
@@ -202,10 +181,6 @@ def training_loop(
     #Construct the pretrained (true) score network f_phi
     true_score = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs) # subclass of torch.nn.Module
     true_score.eval().requires_grad_(False).to(device)
-
-    if remove_dropout:
-        dist.print0('Substituting Dropout layer...')
-        remove_dropout_from_model(true_score)
 
     #Construct the generator (fake) score network f_psi
     fake_score = copy.deepcopy(true_score).train().requires_grad_(True).to(device)
@@ -433,7 +408,7 @@ def training_loop(
             dist.print0()
             dist.print0('Aborting...')
                         
-        if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0 or cur_tick in [10,20,30,40,50,60,70,80,90,100]):
+        if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0 or cur_tick in [1, 10]):
 
             dist.print0('Exporting sample images...')
             if dist.get_rank() == 0:
