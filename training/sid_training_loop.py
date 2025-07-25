@@ -148,6 +148,7 @@ def training_loop(
     metrics             = None,
     init_sigma          = None,
     D                   = "inf",
+    update_fake_score_iters = 1,
     data_stat           = None,
 ):
     # Initialize.
@@ -302,36 +303,37 @@ def training_loop(
         
         #Update fake score network f_psi
         # Accumulate gradients.
-        fake_score_ddp.train().requires_grad_(True)
-        fake_score_optimizer.zero_grad(set_to_none=True)
+        for _ in range(update_fake_score_iters):
+            fake_score_ddp.train().requires_grad_(True)
+            fake_score_optimizer.zero_grad(set_to_none=True)
 
-        for round_idx in range(num_accumulation_rounds):
-            images, labels = next(dataset_iterator)
-            images = images.to(device).to(torch.float32) / 127.5 - 1
-            labels = labels.to(device)
-            with misc.ddp_sync(G_ddp, False):
-                images = sid_sampler(
-                    G_ddp,
-                    latents=torch.randn_like(images),
-                    class_labels=labels,
-                    init_sigma=init_sigma,
-                    D=D,
-                    augment_labels=torch.zeros(images.shape[0], 9).to(images.device),
-                )
-            with misc.ddp_sync(fake_score_ddp, (round_idx == num_accumulation_rounds - 1)):
-                loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe, D=D)
-                loss=loss.sum().mul(loss_scaling / batch_gpu_total)
-                loss.backward()
-        loss_fake_score_print = loss.item()
-        training_stats.report('fake_score_Loss/loss', loss_fake_score_print)
+            for round_idx in range(num_accumulation_rounds):
+                images, labels = next(dataset_iterator)
+                images = images.to(device).to(torch.float32) / 127.5 - 1
+                labels = labels.to(device)
+                with misc.ddp_sync(G_ddp, False):
+                    images = sid_sampler(
+                        G_ddp,
+                        latents=torch.randn_like(images),
+                        class_labels=labels,
+                        init_sigma=init_sigma,
+                        D=D,
+                        augment_labels=torch.zeros(images.shape[0], 9).to(images.device),
+                    )
+                with misc.ddp_sync(fake_score_ddp, (round_idx == num_accumulation_rounds - 1)):
+                    loss = loss_fn(fake_score=fake_score_ddp, images=images, labels=labels, augment_pipe=augment_pipe, D=D)
+                    loss=loss.sum().mul(loss_scaling / batch_gpu_total)
+                    loss.backward()
+            loss_fake_score_print = loss.item()
+            training_stats.report('fake_score_Loss/loss', loss_fake_score_print)
 
-        fake_score_ddp.eval().requires_grad_(False)
+            fake_score_ddp.eval().requires_grad_(False)
 
-        for param in fake_score.parameters():
-            if param.grad is not None:
-                torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
+            for param in fake_score.parameters():
+                if param.grad is not None:
+                    torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
 
-        fake_score_optimizer.step()
+            fake_score_optimizer.step()
 
         #Update generator G_theta
         G_ddp.train().requires_grad_(True)

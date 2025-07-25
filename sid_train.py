@@ -104,10 +104,10 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--glr',           help='Learning rate of fake data generator', metavar='FLOAT',      type=click.FloatRange(min=0, min_open=True), default=1e-5, show_default=True)
 @click.option('--g_beta1',           help='beta_1 of the Adam optimizer for generator', metavar='FLOAT',      type=click.FloatRange(min=0, min_open=False), default=0, show_default=True)
 
-# Parameters for PFGMPP
+# Parameters for IDMD
 @click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
 @click.option('--loss_sid_or_idmd',    help='', metavar='STR', type=str, default="sid", show_default=True)
-
+@click.option('--update_fake_score_iters',    help='', metavar='FLOAT', type=float, default=1, show_default=True)
 
 
 def main(**kwargs):
@@ -160,6 +160,7 @@ Pretrained Diffusion Models for One-Step Generation".
     
     c.init_sigma = opts.init_sigma
     c.D = opts.aug_dim if opts.aug_dim == "inf" else int(opts.aug_dim)
+    c.update_fake_score_iters = opts.update_fake_score_iters
 
     # Validate dataset options.
     try:
