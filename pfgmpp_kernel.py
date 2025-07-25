@@ -10,10 +10,13 @@ EPS = 1e-8
 def sample_noise(
     *,
     latents: Tensor,
-    sigma: Tensor,
+    sigma: Tensor | float,
     #
     D: int | str = "inf",
 ):
+    if isinstance(sigma, (float, int)):
+        sigma = torch.tensor([sigma] * len(latents), device=latents.device, dtype=latents.dtype)
+
     if D == "inf": # EDM case
         noise = latents * sigma.view(-1, 1, 1, 1)
     else: # PFGMPP case
