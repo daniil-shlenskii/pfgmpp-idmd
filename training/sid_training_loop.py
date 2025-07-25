@@ -405,7 +405,7 @@ def training_loop(
                 
             dist.print0('Evaluating metrics...')
             for metric in metrics:
-                result_dict = calculate_metric(metric=metric, G=G_ema, init_sigma=init_sigma, # TODO:
+                result_dict = calculate_metric(metric=metric, G=G_ema, init_sigma=init_sigma,
                     dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
                 if dist.get_rank() == 0:
                     print(result_dict.results)
