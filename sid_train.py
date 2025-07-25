@@ -108,6 +108,7 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
 @click.option('--loss_sid_or_idmd',    help='', metavar='STR', type=str, default="sid", show_default=True)
 @click.option('--update_fake_score_iters',    help='', metavar='FLOAT', type=float, default=1, show_default=True)
+@click.option('--remove_dropout',    help='', metavar='BOOL', type=bool, default=False, show_default=True)
 
 
 def main(**kwargs):
@@ -161,6 +162,7 @@ Pretrained Diffusion Models for One-Step Generation".
     c.init_sigma = opts.init_sigma
     c.D = opts.aug_dim if opts.aug_dim == "inf" else int(opts.aug_dim)
     c.update_fake_score_iters = opts.update_fake_score_iters
+    c.remove_dropout = opts.remove_dropout
 
     # Validate dataset options.
     try:
