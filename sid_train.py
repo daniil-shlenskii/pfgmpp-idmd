@@ -105,7 +105,7 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--g_beta1',           help='beta_1 of the Adam optimizer for generator', metavar='FLOAT',      type=click.FloatRange(min=0, min_open=False), default=0, show_default=True)
 
 # Parameters for PFGMPP
-@click.option('--aug_dim',    help='Noise standard deviation that is fixed during distillation and generation', metavar='INT|STR', type=int|str, default="inf", show_default=True)
+@click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
 @click.option('--loss_sid_or_iddm',    help='', metavar='STR', type=str, default="sid", show_default=True)
 
 
@@ -159,7 +159,7 @@ Pretrained Diffusion Models for One-Step Generation".
     c.g_optimizer_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=opts.glr, betas=[opts.g_beta1, 0.999], eps = 1e-8 if not opts.fp16 else 1e-6)
     
     c.init_sigma = opts.init_sigma
-    c.D = opts.aug_dim
+    c.D = opts.aug_dim if opts.aug_dim == "inf" else int(opts.aug_dim)
 
     # Validate dataset options.
     try:

@@ -166,7 +166,7 @@ def save_fid(fid, fname):
 
 @click.command()
 
-@click.option('--aug_dim',    help='', metavar='INT|STR', type=int|str, default="inf", show_default=True)
+@click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
 @click.option('--init_sigma',    help='Noise standard deviation that is fixed during distillation and generation', metavar='FLOAT', type=click.FloatRange(min=0, min_open=True), default=2.5, show_default=True)
 @click.option('--data_stat',     help='Path to the dataset stats', metavar='ZIP|DIR',               type=str, default=None)
 @click.option('--network', 'network_pkl',  help='Network pickle filename', metavar='PATH|URL',                      type=str, required=True)
@@ -215,12 +215,15 @@ def main(**kwargs):
     torch.multiprocessing.set_start_method('spawn')
     dist.init()
     
+
     
     network_pkl=opts.network_pkl
     
     
     seeds = opts.seeds
     max_batch_size = opts.max_batch_size
+
+    D = opts.aug_dim if opts.aug_dim == "inf" else int(opts.aug_dim)
     
     num_batches = ((len(seeds) - 1) // (max_batch_size * dist.get_world_size()) + 1) * dist.get_world_size()
     all_batches = torch.as_tensor(seeds).tensor_split(num_batches)
@@ -264,7 +267,7 @@ def main(**kwargs):
 
         # Generate images.
         sampler_kwargs = {}
-        images = sid_sampler(net, latents=latents, class_labels=class_labels, init_sigma=opts.init_sigma, D=opts.aug_dim, **sampler_kwargs)
+        images = sid_sampler(net, latents=latents, class_labels=class_labels, init_sigma=opts.init_sigma, D=D)
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
