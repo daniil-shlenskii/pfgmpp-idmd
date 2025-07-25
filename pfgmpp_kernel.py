@@ -24,7 +24,6 @@ def sample_noise(
         N = np.prod(latents.shape[1:])
 
         # Convert sigma to r
-        print(f"{D = }")
         r = sigma.reshape(-1) * D**0.5
 
         # Sample from inverse-beta distribution

@@ -32,7 +32,32 @@ if [ "$dataset" = 'cifar10-uncond' ]; then
     --data 'data/datasets/cifar10-32x32.zip' \
     --arch ddpmpp \
     --edm_model cifar10-uncond \
-    --metrics fid50k_full,is50k \
+    --metrics fid50k_full \
+    --tick 10 \
+    --snap 50 \
+    --dump 500 \
+    --lr 1e-5 \
+    --glr 1e-5 \
+    --fp16 0 \
+    --ls 1 \
+    --lsg 100 \
+    --duration 500 \
+    --data_stat 'https://nvlabs-fi-cdn.nvidia.com/edm/fid-refs/cifar10-32x32.npz'
+    #\
+    #--resume 'image_experiment/sid-train-runs/cifar10-uncond/00002-cifar10-32x32-uncond-ddpmpp-edmglr1e-05-lr1e-05-initsigma2.5-gpus4-alpha1.2-batch256-tmax800-fp32/training-state-000128.pt'
+elif [ "$dataset" = 'cifar10-uncond-D-2048' ]; then
+    torchrun --standalone --nproc_per_node=2 sid_train.py \
+    --aug_dim 2048 \
+    --loss_sid_or_idmd "idmd" \
+    --alpha 1.2 \
+    --tmax 800 \
+    --init_sigma 2.5 \
+    --batch 256 \
+    --outdir "image_experiment/sid-train-runs/${dataset}" \
+    --data 'data/datasets/cifar10-32x32.zip' \
+    --arch ncsnpp \
+    --edm_model 'downloads/pfgmpp_ckpts/cifar10_ncsnpp_D_2048.pkl' \
+    --metrics fid50k_full \
     --tick 10 \
     --snap 50 \
     --dump 500 \
