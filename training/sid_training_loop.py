@@ -204,6 +204,7 @@ def training_loop(
     true_score.eval().requires_grad_(False).to(device)
 
     if remove_dropout:
+        dist.print0('Substituting Dropout layer...')
         remove_dropout_from_model(true_score)
 
     #Construct the generator (fake) score network f_psi
