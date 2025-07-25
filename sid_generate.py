@@ -36,12 +36,11 @@ from training import dataset
 #----------------------------------------------------------------------------
 
 def sid_sampler(
-    net, latents, class_labels=None, randn_like=torch.randn_like, init_sigma=2.5, D="inf",
+    net, latents, class_labels=None, randn_like=torch.randn_like, init_sigma=2.5, D="inf", **sampling_kwargs
 ):
-    latents=latents.to(torch.float64)
-    init_sigma = torch.tensor([init_sigma] * len(latents), device=latents.device, dtype=torch.float64)
+    init_sigma = torch.tensor([init_sigma] * len(latents), device=latents.device, dtype=latents.dtype)
     z = sample_noise(latents=latents, sigma=init_sigma, D=D)
-    x = net(z, init_sigma, class_labels).to(torch.float64)
+    x = net(z, init_sigma, class_labels, **sampling_kwargs)
     return x
 
 def calculate_inception_stats(detector_url,
