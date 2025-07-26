@@ -456,7 +456,7 @@ def training_loop(
             dist.print0()
             dist.print0('Aborting...')
                         
-        if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0 or cur_tick in [1, 10]):
+        if (snapshot_ticks is not None) and cur_tick != 0 and (done or cur_tick % snapshot_ticks == 0 or cur_tick in [10]):
 
             dist.print0('Exporting sample images...')
             if dist.get_rank() == 0:
