@@ -172,7 +172,16 @@ def training_loop(
     update_fake_score_iters = 1,
     remove_dropout      = False,
     data_stat           = None,
+    emas_for_eval       = None, # G_ema, G_ema990, G_ema995, G_ema999 | None = all of them
 ):
+    # Check emas_for_eval contains valid values
+    EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY = "G_ema", "G_ema990", "G_ema995", "G_ema999"
+    EMA_KEYS = [EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY]
+    if emas_for_eval is None:
+        emas_for_eval = EMA_KEYS
+    else:
+        assert set(emas_for_eval).issubset(set(EMA_KEYS))
+
     # Initialize.
     start_time = time.time()
     np.random.seed((seed * dist.get_world_size() + dist.get_rank()) % (1 << 31))
@@ -247,19 +256,19 @@ def training_loop(
             misc.copy_params_and_buffers(src_module=data['G'], dst_module=G, require_all=True)
 
             G_ema = copy.deepcopy(G).eval().requires_grad_(False)
-            misc.copy_params_and_buffers(src_module=data['G_ema'], dst_module=G_ema, require_all=True)
+            misc.copy_params_and_buffers(src_module=data[EMA_KEY], dst_module=G_ema, require_all=True)
             G_ema.eval().requires_grad_(False)
 
             G_ema990 = copy.deepcopy(G).eval().requires_grad_(False)
-            misc.copy_params_and_buffers(src_module=data['G_ema990'], dst_module=G_ema990, require_all=True)
+            misc.copy_params_and_buffers(src_module=data[EMA990_KEY], dst_module=G_ema990, require_all=True)
             G_ema990.eval().requires_grad_(False)
 
             G_ema995 = copy.deepcopy(G).eval().requires_grad_(False)
-            misc.copy_params_and_buffers(src_module=data['G_ema995'], dst_module=G_ema995, require_all=True)
+            misc.copy_params_and_buffers(src_module=data[EMA995_KEY], dst_module=G_ema995, require_all=True)
             G_ema995.eval().requires_grad_(False)
 
             G_ema999 = copy.deepcopy(G).eval().requires_grad_(False)
-            misc.copy_params_and_buffers(src_module=data['G_ema999'], dst_module=G_ema999, require_all=True)
+            misc.copy_params_and_buffers(src_module=data[EMA999_KEY], dst_module=G_ema999, require_all=True)
             G_ema999.eval().requires_grad_(False)
 
             fake_score_optimizer.load_state_dict(data['fake_score_optimizer_state'])
@@ -295,9 +304,9 @@ def training_loop(
         G_ddp.eval().requires_grad_(False)
 
     G_ema_storage = tuple(zip(
-        ("G_ema", "G_ema990", "G_ema995", "G_ema999"),
-        (None   , 0.99     ,  0.995    ,  0.999     ),
-        (G_ema  , G_ema990 ,  G_ema995 ,  G_ema999  ),
+        (EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY),
+        (None   , 0.99      , 0.995     , 0.999     ),
+        (G_ema  , G_ema990  , G_ema995  , G_ema999  ),
     )) # tuple of (ema_key, ema_decay, ema)
     for ema_key, ema_decay, ema in G_ema_storage:
         os.makedirs(os.path.join(run_dir, ema_key), exist_ok=True)
@@ -493,6 +502,8 @@ def training_loop(
             dist.print0('Evaluating metrics...')
             for metric in metrics:
                 for ema_key, ema_decay, ema in G_ema_storage:
+                    if ema_key not in emas_for_eval:
+                        continue
                     result_dict = {}
                     result_dict = calculate_metric(metric=metric, G=ema, init_sigma=init_sigma,
                         dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
