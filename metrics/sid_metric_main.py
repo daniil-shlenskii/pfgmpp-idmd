@@ -6,19 +6,20 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import json
 import os
 import time
-import json
+
 import torch
+
 import dnnlib
 
-from . import sid_metric_utils as metric_utils
-from . import sid_frechet_inception_distance as frechet_inception_distance
-from . import sid_kernel_inception_distance
-from . import sid_precision_recall as precision_recall
 from . import perceptual_path_length
+from . import sid_frechet_inception_distance as frechet_inception_distance
 from . import sid_inception_score as inception_score
-
+from . import sid_kernel_inception_distance
+from . import sid_metric_utils as metric_utils
+from . import sid_precision_recall as precision_recall
 
 #----------------------------------------------------------------------------
 
@@ -93,6 +94,12 @@ def fid50k_full(opts):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
     fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=50000)
     return dict(fid50k_full=fid)
+
+@register_metric
+def fid10k_full(opts):
+    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=10000)
+    return dict(fid10k_full=fid)
 
 @register_metric
 def kid50k_full(opts):
