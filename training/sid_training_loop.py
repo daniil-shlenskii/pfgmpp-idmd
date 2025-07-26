@@ -479,7 +479,6 @@ def training_loop(
                 for ema_key, ema_decay, ema in G_ema_storage:
                     if ema_key not in emas_for_eval:
                         continue
-                    result_dict = {}
                     result_dict = calculate_metric(metric=metric, G=ema, init_sigma=init_sigma,
                         dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
                     if dist.get_rank() == 0:
