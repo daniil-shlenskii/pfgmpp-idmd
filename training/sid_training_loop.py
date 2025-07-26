@@ -283,8 +283,9 @@ def training_loop(
         (None   , 0.99      , 0.995     , 0.999     ),
         (G_ema  , G_ema990  , G_ema995  , G_ema999  ),
     )) # tuple of (ema_key, ema_decay, ema)
-    for ema_key, ema_decay, ema in G_ema_storage:
-        os.makedirs(os.path.join(run_dir, ema_key), exist_ok=True)
+    if dist.get_rank() == 0:
+        for ema_key, ema_decay, ema in G_ema_storage:
+            os.makedirs(os.path.join(run_dir, ema_key), exist_ok=True)
         
     # Export sample images.
     grid_size = None
