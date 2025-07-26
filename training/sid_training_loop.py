@@ -151,7 +151,16 @@ def training_loop(
     D                   = "inf",
     update_fake_score_iters = 1,
     data_stat           = None,
+    emas_for_eval       = None, # G_ema, G_ema990, G_ema995, G_ema999 | None = all of them
 ):
+    # Check emas_for_eval contains valid values
+    EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY = "G_ema", "G_ema990", "G_ema995", "G_ema999"
+    EMA_KEYS = [EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY]
+    if emas_for_eval is None:
+        emas_for_eval = EMA_KEYS
+    else:
+        assert set(emas_for_eval).issubset(set(EMA_KEYS))
+
     # Initialize.
     start_time = time.time()
     np.random.seed((seed * dist.get_world_size() + dist.get_rank()) % (1 << 31))
@@ -220,9 +229,23 @@ def training_loop(
             data = torch.load(resume_training, map_location=torch.device('cpu'))
             misc.copy_params_and_buffers(src_module=data['fake_score'], dst_module=fake_score, require_all=True)
             misc.copy_params_and_buffers(src_module=data['G'], dst_module=G, require_all=True)
+
             G_ema = copy.deepcopy(G).eval().requires_grad_(False)
-            misc.copy_params_and_buffers(src_module=data['G_ema'], dst_module=G_ema, require_all=True)
+            misc.copy_params_and_buffers(src_module=data[EMA_KEY], dst_module=G_ema, require_all=True)
             G_ema.eval().requires_grad_(False)
+
+            G_ema990 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data[EMA990_KEY], dst_module=G_ema990, require_all=True)
+            G_ema990.eval().requires_grad_(False)
+
+            G_ema995 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data[EMA995_KEY], dst_module=G_ema995, require_all=True)
+            G_ema995.eval().requires_grad_(False)
+
+            G_ema999 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data[EMA999_KEY], dst_module=G_ema999, require_all=True)
+            G_ema999.eval().requires_grad_(False)
+
             fake_score_optimizer.load_state_dict(data['fake_score_optimizer_state'])
             g_optimizer.load_state_dict(data['g_optimizer_state'])
             del data # conserve memory
@@ -238,12 +261,30 @@ def training_loop(
             dist.print0('Setting up optimizer...')
             fake_score_ddp = torch.nn.parallel.DistributedDataParallel(fake_score, device_ids=[device], broadcast_buffers=False,find_unused_parameters=False)
             G_ddp = torch.nn.parallel.DistributedDataParallel(G, device_ids=[device], broadcast_buffers=False,find_unused_parameters=False)
+
             G_ema = copy.deepcopy(G).eval().requires_grad_(False)
             misc.copy_params_and_buffers(src_module=data['ema'], dst_module=G_ema, require_all=False)
+
+            G_ema990 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data['ema'], dst_module=G_ema990, require_all=False)
+
+            G_ema995 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data['ema'], dst_module=G_ema995, require_all=False)
+
+            G_ema999 = copy.deepcopy(G).eval().requires_grad_(False)
+            misc.copy_params_and_buffers(src_module=data['ema'], dst_module=G_ema999, require_all=False)
+
             del data # conserve memory
         fake_score_ddp.eval().requires_grad_(False)
         G_ddp.eval().requires_grad_(False)
-        
+
+    G_ema_storage = tuple(zip(
+        (EMA_KEY, EMA990_KEY, EMA995_KEY, EMA999_KEY),
+        (None   , 0.99      , 0.995     , 0.999     ),
+        (G_ema  , G_ema990  , G_ema995  , G_ema999  ),
+    )) # tuple of (ema_key, ema_decay, ema)
+    for ema_key, ema_decay, ema in G_ema_storage:
+        os.makedirs(os.path.join(run_dir, ema_key), exist_ok=True)
         
     # Export sample images.
     grid_size = None
@@ -260,19 +301,20 @@ def training_loop(
         if resume_training is None:
             print('Exporting sample images...')
             save_image_grid(img=images, fname=os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
-            images = torch.cat([
-                sid_sampler(
-                    G_ema,
-                    latents=z,
-                    class_labels=c,
-                    init_sigma=init_sigma,
-                    D=D,
-                    augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
-                ).cpu()
-                for z, c in zip(grid_z, grid_c)
-            ]).numpy()
-            save_image_grid(img=images, fname=os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
-            del images
+            for ema_key, ema_decay, ema in G_ema_storage:
+                images = torch.cat([
+                    sid_sampler(
+                        ema,
+                        latents=z,
+                        class_labels=c,
+                        init_sigma=init_sigma,
+                        D=D,
+                        augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
+                    ).cpu()
+                    for z, c in zip(grid_z, grid_c)
+                ]).numpy()
+                save_image_grid(img=images, fname=os.path.join(run_dir, ema_key, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+                del images
 
     # Train.
     dist.print0(f'Training for {total_kimg} kimg...')
@@ -284,18 +326,17 @@ def training_loop(
     maintenance_time = tick_start_time - start_time
     dist.update_progress(cur_nimg // 1000, total_kimg)
     stats_jsonl = None
-    stats_metrics = dict()
     
-    data = dict(ema=G_ema)
-    for key, value in data.items():
-        if isinstance(value, torch.nn.Module):
-            value = copy.deepcopy(value).eval().requires_grad_(False)
-            # misc.check_ddp_consistency(value)
-            data[key] = value.cpu()
-        del value # conserve memory
+    for ema_key, ema_decay, ema in G_ema_storage:
+        data = dict(ema=ema)
+        for key, value in data.items():
+            if isinstance(value, torch.nn.Module):
+                value = copy.deepcopy(value).eval().requires_grad_(False)
+                data[key] = value.cpu()
+            del value # conserve memory
         
-    if dist.get_rank() == 0:
-        save_data(data=data, fname=os.path.join(run_dir, f'network-snapshot-{alpha:03f}-{cur_nimg//1000:06d}.pkl'))
+        if dist.get_rank() == 0:
+            save_data(data=data, fname=os.path.join(run_dir, ema_key, f'network-snapshot-{alpha:03f}-{cur_nimg//1000:06d}.pkl'))
     
     del data # conserve memory
     dist.print0('Exporting sample images...')
@@ -378,6 +419,13 @@ def training_loop(
         for p_ema, p_true_score in zip(G_ema.parameters(), G.parameters()):
             p_ema.copy_(p_true_score.detach().lerp(p_ema, ema_beta))
 
+        for ema_key, ema_decay, ema in G_ema_storage:
+            if ema_decay is None:
+                continue
+            for p_ema, p_true_score in zip(ema.parameters(), G.parameters()):
+                p_ema.copy_(p_true_score.detach().lerp(p_ema, ema_decay))
+
+
         # Perform maintenance tasks once per tick.
         cur_nimg += batch_size
         done = (cur_nimg >= total_kimg * 1000)
@@ -412,42 +460,47 @@ def training_loop(
 
             dist.print0('Exporting sample images...')
             if dist.get_rank() == 0:
-                images = torch.cat([
-                    sid_sampler(
-                        G_ema,
-                        latents=z,
-                        class_labels=c,
-                        init_sigma=init_sigma,
-                        D=D,
-                        augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
-                    ).cpu() for z, c in zip(grid_z, grid_c)
-                ]).numpy()
-                save_image_grid(img=images, fname=os.path.join(run_dir, f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
-                del images
+                for ema_key, ema_decay, ema in G_ema_storage:
+                    images = torch.cat([
+                        sid_sampler(
+                            ema,
+                            latents=z,
+                            class_labels=c,
+                            init_sigma=init_sigma,
+                            D=D,
+                            augment_labels=torch.zeros(z.shape[0], 9).to(z.device)
+                        ).cpu() for z, c in zip(grid_z, grid_c)
+                    ]).numpy()
+                    save_image_grid(img=images, fname=os.path.join(run_dir, ema_key, f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+                    del images
                 
             dist.print0('Evaluating metrics...')
             for metric in metrics:
-                result_dict = calculate_metric(metric=metric, G=G_ema, init_sigma=init_sigma,
-                    dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
+                for ema_key, ema_decay, ema in G_ema_storage:
+                    if ema_key not in emas_for_eval:
+                        continue
+                    result_dict = {}
+                    result_dict = calculate_metric(metric=metric, G=ema, init_sigma=init_sigma,
+                        dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), local_rank=dist.get_local_rank(), device=device,data_stat=data_stat)
+                    if dist.get_rank() == 0:
+                        print(f"{ema_key}:", result_dict.results)
+                        metric_main.report_metric(result_dict, run_dir=os.path.join(run_dir, ema_key), snapshot_pkl=f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png', alpha=alpha)  
+                
+            for ema_key, ema_decay, ema in G_ema_storage:
+                data = dict(ema=ema)
+                for key, value in data.items():
+                    if isinstance(value, torch.nn.Module):
+                        value = copy.deepcopy(value).eval().requires_grad_(False)
+                        data[key] = value.cpu()
+                    del value # conserve memory
+                    
                 if dist.get_rank() == 0:
-                    print(result_dict.results)
-                    metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'fakes_{alpha:03f}_{cur_nimg//1000:06d}.png', alpha=alpha)  
-                stats_metrics.update(result_dict.results)
-                
-            data = dict(ema=G_ema)
-            for key, value in data.items():
-                if isinstance(value, torch.nn.Module):
-                    value = copy.deepcopy(value).eval().requires_grad_(False)
-                    data[key] = value.cpu()
-                del value # conserve memory
-                
-            if dist.get_rank() == 0:
-                save_data(data=data, fname=os.path.join(run_dir, f'network-snapshot-{alpha:03f}-{cur_nimg//1000:06d}.pkl'))               
-            del data # conserve memory
+                    save_data(data=data, fname=os.path.join(run_dir, ema_key, f'network-snapshot-{alpha:03f}-{cur_nimg//1000:06d}.pkl'))
+                del data # conserve memory
 
         if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick != 0 and dist.get_rank() == 0:
             dist.print0(f'saving checkpoint: training-state-{cur_nimg//1000:06d}.pt')
-            save_pt(pt=dict(fake_score=fake_score, G=G, G_ema=G_ema, fake_score_optimizer_state=fake_score_optimizer.state_dict(), g_optimizer_state=g_optimizer.state_dict()), fname=os.path.join(run_dir, f'training-state-{cur_nimg//1000:06d}.pt'))
+            save_pt(pt=dict(fake_score=fake_score, G=G, G_ema=G_ema, G_ema990=G_ema990, G_ema995=G_ema995, G_ema999=G_ema999, fake_score_optimizer_state=fake_score_optimizer.state_dict(), g_optimizer_state=g_optimizer.state_dict()), fname=os.path.join(run_dir, f'training-state-{cur_nimg//1000:06d}.pt'))
 
         # Update logs.
         training_stats.default_collector.update()

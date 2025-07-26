@@ -108,6 +108,7 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--aug_dim',    help='', metavar='STR', type=str, default="inf", show_default=True)
 @click.option('--loss_sid_or_idmd',    help='', metavar='STR', type=str, default="sid", show_default=True)
 @click.option('--update_fake_score_iters',    help='', metavar='INT', type=int, default=1, show_default=True)
+@click.argument('--emas_or_eval',    help='', nargs=-1)
 
 
 def main(**kwargs):
@@ -161,6 +162,8 @@ Pretrained Diffusion Models for One-Step Generation".
     c.init_sigma = opts.init_sigma
     c.D = opts.aug_dim if opts.aug_dim == "inf" else int(opts.aug_dim)
     c.update_fake_score_iters = opts.update_fake_score_iters
+    if opts.emas_or_eval is not None:
+        c.emas_or_eval = opts.emas_or_eval
 
     # Validate dataset options.
     try:
